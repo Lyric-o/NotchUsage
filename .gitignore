@@ -4,3 +4,5 @@ dist/
 .swiftpm/
 *.xcodeproj/xcuserdata/
 *.xcworkspace/xcuserdata/
+__pycache__/
+*.pyc

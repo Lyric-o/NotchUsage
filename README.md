@@ -9,6 +9,13 @@
   Live usage, reset times, hover details, and launch at login.
 </p>
 
+## Demo
+
+[Watch the 31-second product demo](demo/NotchUsage-demo.mp4)
+
+The demo shows the compact notch view, hover details, reset times, manual
+refresh, and launch-at-login control.
+
 ## What it does
 
 NotchUsage sits around the MacBook notch without taking space from your desktop.
@@ -87,7 +94,7 @@ swift build -c release
 
 ## Uninstall
 
-Quit NotchUsage, disable **登录时自动启动** from its menu if enabled, then remove:
+Quit NotchUsage, disable **Launch at Login** from its menu if enabled, then remove:
 
 ```bash
 rm -r ~/Applications/NotchUsage.app

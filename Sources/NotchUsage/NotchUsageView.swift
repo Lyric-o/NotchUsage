@@ -105,8 +105,8 @@ struct NotchUsageView: View {
             }
         }
         .overlay(alignment: .bottom) {
-            if store.errorMessage != nil {
-                Text("数据读取失败，请检查配置")
+            if let errorMessage = store.errorMessage {
+                Text(errorMessage)
                     .font(.system(size: 9))
                     .foregroundStyle(.red.opacity(0.9))
                     .offset(y: -2)
@@ -254,18 +254,36 @@ private struct ProviderDetailView: View {
                 .font(.system(size: 12, weight: .bold))
             if let secondary = usage.secondaryRemainingPercent {
                 resetRow(
-                    title: "5 小时",
+                    title: "5-hour",
                     percent: secondary,
                     reset: usage.secondaryResetsAt
                 )
             }
             resetRow(
-                title: name == "Claude" ? "每周" : (usage.label ?? "当前周期"),
+                title: primaryWindowTitle,
                 percent: usage.remainingPercent,
                 reset: usage.resetsAt
             )
         }
         .frame(maxWidth: .infinity)
+    }
+
+    private var primaryWindowTitle: String {
+        if name == "Claude" {
+            return "Weekly"
+        }
+
+        let label = usage.label?.lowercased() ?? ""
+        if label.contains("weekly") || label.contains("每周") {
+            return "Weekly"
+        }
+        if label.contains("hour") || label.contains("小时") {
+            let hourCount = label.split(whereSeparator: { !$0.isNumber }).first
+            if let hourCount {
+                return "\(hourCount)-hour"
+            }
+        }
+        return "Current window"
     }
 
     private func resetRow(title: String, percent: Double, reset: Date?) -> some View {
@@ -277,11 +295,19 @@ private struct ProviderDetailView: View {
                     .foregroundStyle(tint)
                     .monospacedDigit()
             }
-            Text(reset.map { "重置：\($0.formatted(date: .abbreviated, time: .shortened))" } ?? "重置时间暂不可用")
+            Text(reset.map { "Resets: \(Self.resetFormatter.string(from: $0))" } ?? "Reset time unavailable")
                 .font(.system(size: 8))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
         }
         .font(.system(size: 9, weight: .medium))
     }
+
+    private static let resetFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter
+    }()
 }

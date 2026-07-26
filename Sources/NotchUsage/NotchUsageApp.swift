@@ -34,10 +34,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         item.button?.image = NSImage(systemSymbolName: "gauge.with.dots.needle.33percent", accessibilityDescription: "Notch Usage")
 
         let menu = NSMenu()
-        menu.addItem(withTitle: "刷新用量", action: #selector(refresh), keyEquivalent: "r")
-        menu.addItem(withTitle: "打开配置文件", action: #selector(openConfig), keyEquivalent: ",")
+        menu.addItem(withTitle: "Refresh Usage", action: #selector(refresh), keyEquivalent: "r")
+        menu.addItem(withTitle: "Open Configuration…", action: #selector(openConfig), keyEquivalent: ",")
         let loginItem = NSMenuItem(
-            title: "登录时自动启动",
+            title: "Launch at Login",
             action: #selector(toggleLaunchAtLogin),
             keyEquivalent: ""
         )
@@ -46,7 +46,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         launchAtLoginItem = loginItem
         updateLaunchAtLoginMenu()
         menu.addItem(.separator())
-        menu.addItem(withTitle: "退出", action: #selector(quit), keyEquivalent: "q")
+        menu.addItem(withTitle: "Quit NotchUsage", action: #selector(quit), keyEquivalent: "q")
         menu.items.forEach { $0.target = self }
         item.menu = menu
         statusItem = item
@@ -74,7 +74,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         } catch {
             let alert = NSAlert()
-            alert.messageText = "无法更改登录启动设置"
+            alert.messageText = "Couldn’t Change Launch at Login"
             alert.informativeText = error.localizedDescription
             alert.runModal()
         }
