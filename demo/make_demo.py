@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Render an editorial, ARIS-inspired product film for NotchUsage."""
+"""Render the English launch film for NotchUsage."""
 
 from __future__ import annotations
 
@@ -10,406 +10,568 @@ import sys
 from functools import lru_cache
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 
 W, H = 1440, 900
 FPS = 24
-DURATION = 31
+DURATION = 30
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "demo" / "NotchUsage-demo.mp4"
 
-FONT_SERIF = "/System/Library/Fonts/Supplemental/Georgia.ttf"
-FONT_SERIF_BOLD = "/System/Library/Fonts/Supplemental/Georgia Bold.ttf"
-FONT_SONG = "/System/Library/Fonts/Supplemental/Songti.ttc"
-FONT_SANS = "/System/Library/AssetsV2/com_apple_MobileAsset_Font7/3419f2a427639ad8c8e139149a287865a90fa17e.asset/AssetData/PingFang.ttc"
+FONT_SANS = "/System/Library/Fonts/SFNS.ttf"
+FONT_ROUNDED = "/System/Library/Fonts/SFNSRounded.ttf"
+FONT_SERIF = "/System/Library/Fonts/NewYork.ttf"
 
-PAPER = (244, 241, 234)
-PAPER_2 = (237, 232, 222)
-INK = (28, 26, 23)
-INK_2 = (49, 46, 41)
-MUTED = (113, 106, 95)
-HAIRLINE = (205, 198, 186)
-RUST = (154, 59, 40)
-SLATE = (101, 115, 143)
-CLAUDE = (203, 99, 61)
-CODEX = (44, 139, 111)
-WHITE = (250, 248, 243)
+NIGHT = (10, 12, 15)
+NIGHT_2 = (17, 20, 25)
+PANEL = (24, 27, 32)
+PANEL_2 = (31, 35, 42)
+IVORY = (242, 238, 230)
+IVORY_2 = (215, 209, 199)
+MUTED = (143, 149, 158)
+HAIRLINE = (255, 255, 255, 24)
+RUST = (188, 76, 52)
+RUST_BRIGHT = (231, 112, 80)
+CLAUDE = (218, 124, 85)
+CODEX = (85, 203, 164)
+BLUE = (103, 145, 255)
+BLACK = (2, 3, 4)
+REPO = "github.com/Lyric-o/NotchUsage"
+CLONE = "git clone https://github.com/Lyric-o/NotchUsage.git"
 
 
 @lru_cache(maxsize=None)
-def fnt(size: int, family: str = "sans", bold: bool = False):
-    if family == "serif":
-        return ImageFont.truetype(FONT_SERIF_BOLD if bold else FONT_SERIF, size)
-    if family == "song":
-        return ImageFont.truetype(FONT_SONG, size)
-    return ImageFont.truetype(FONT_SANS, size)
+def fnt(size: int, family: str = "sans"):
+    path = {
+        "sans": FONT_SANS,
+        "rounded": FONT_ROUNDED,
+        "serif": FONT_SERIF,
+    }[family]
+    return ImageFont.truetype(path, size)
 
 
-def clamp(v: float) -> float:
-    return max(0.0, min(1.0, v))
+def clamp(value: float) -> float:
+    return max(0.0, min(1.0, value))
 
 
-def smooth(v: float) -> float:
-    v = clamp(v)
-    return v * v * (3 - 2 * v)
+def ease(value: float) -> float:
+    value = clamp(value)
+    return value * value * (3 - 2 * value)
 
 
-def phase(t: float, a: float, b: float) -> float:
-    return smooth((t - a) / (b - a))
+def phase(t: float, start: float, end: float) -> float:
+    return ease((t - start) / (end - start))
 
 
-def scene_alpha(t: float, start: float, end: float, fade: float = 0.7) -> float:
-    return phase(t, start, start + fade) * (1 - phase(t, end - fade, end))
+def fade(t: float, start: float, end: float, edge: float = 0.65) -> float:
+    return phase(t, start, start + edge) * (1 - phase(t, end - edge, end))
 
 
-def composite(base: Image.Image, layer: Image.Image, opacity: float = 1.0):
-    if opacity <= 0:
-        return
-    if opacity < 1:
-        alpha = layer.getchannel("A").point(lambda x: int(x * opacity))
-        layer.putalpha(alpha)
-    base.alpha_composite(layer)
+def lerp(a: float, b: float, amount: float) -> float:
+    return a + (b - a) * amount
 
 
-def line(draw, xy, fill=HAIRLINE, width=1):
-    draw.line(xy, fill=fill, width=width)
+def mix(a: tuple[int, int, int], b: tuple[int, int, int], amount: float):
+    return tuple(int(lerp(a[i], b[i], amount)) for i in range(3))
 
 
 def rounded(draw, box, radius, fill, outline=None, width=1):
     draw.rounded_rectangle(box, radius=radius, fill=fill, outline=outline, width=width)
 
 
-def tracking(draw, xy, text, font, fill, spacing=3):
+def line(draw, points, fill=HAIRLINE, width=1):
+    draw.line(points, fill=fill, width=width)
+
+
+def tracking(draw, xy, text, font, fill, spacing=2):
     x, y = xy
     for char in text:
         draw.text((x, y), char, font=font, fill=fill)
         x += draw.textlength(char, font=font) + spacing
 
 
-def paper_background() -> Image.Image:
-    image = Image.new("RGBA", (W, H), PAPER + (255,))
+def alpha_composite(base: Image.Image, layer: Image.Image, opacity: float):
+    if opacity <= 0:
+        return
+    if opacity < 1:
+        layer = layer.copy()
+        channel = layer.getchannel("A").point(lambda pixel: int(pixel * opacity))
+        layer.putalpha(channel)
+    base.alpha_composite(layer)
+
+
+def make_background() -> Image.Image:
+    image = Image.new("RGBA", (W, H), NIGHT + (255,))
     draw = ImageDraw.Draw(image, "RGBA")
-    rng = random.Random(7)
-    for _ in range(1800):
+    for y in range(H):
+        amount = y / H
+        color = mix((17, 20, 25), (8, 10, 13), amount)
+        draw.line((0, y, W, y), fill=color + (255,))
+    for x in range(0, W + 1, 72):
+        line(draw, (x, 0, x, H), (255, 255, 255, 8))
+    for y in range(0, H + 1, 72):
+        line(draw, (0, y, W, y), (255, 255, 255, 8))
+    rng = random.Random(18)
+    for _ in range(820):
         x, y = rng.randrange(W), rng.randrange(H)
-        shade = rng.choice([(90, 75, 56, 8), (255, 255, 255, 12)])
-        draw.point((x, y), fill=shade)
-    for x in range(0, W, 120):
-        line(draw, (x, 0, x, H), (80, 70, 55, 5))
+        draw.point((x, y), fill=(255, 255, 255, rng.randrange(3, 13)))
+
+    glow = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    gd = ImageDraw.Draw(glow, "RGBA")
+    gd.ellipse((845, -250, 1545, 450), fill=(178, 66, 45, 58))
+    gd.ellipse((-220, 520, 500, 1240), fill=(65, 117, 111, 27))
+    glow = glow.filter(ImageFilter.GaussianBlur(115))
+    image.alpha_composite(glow)
     return image
 
 
-PAPER_BG = paper_background()
-INK_BG = Image.new("RGBA", (W, H), INK + (255,))
+BACKGROUND = make_background()
 
 
-def editorial_chrome(draw: ImageDraw.ImageDraw, dark=False, active="01"):
-    fg = WHITE if dark else INK
-    muted = (180, 174, 164) if dark else MUTED
-    hair = (255, 255, 255, 25) if dark else HAIRLINE
-    line(draw, (350, 56, 350, 842), hair)
-    tracking(draw, (52, 59), "CONTENTS", fnt(13, "serif", True), muted, 2)
-    items = [
-        ("01", "The Quiet Default"),
-        ("02", "Hover for Context"),
-        ("03", "Refresh, Deliberately"),
-        ("04", "Native by Design"),
-    ]
-    y = 108
-    for num, label in items:
-        color = RUST if num == active else muted
-        draw.text((52, y), num, font=fnt(13, "serif", True), fill=color)
-        draw.text((91, y), label, font=fnt(13, "serif"), fill=fg if num == active else muted)
-        y += 39
-    line(draw, (52, 788, 310, 788), hair)
-    draw.text((52, 806), "LYRIC98  /  MIT  /  2026", font=fnt(10, "sans"), fill=muted)
+def brand(draw, y=54, light=True):
+    fg = IVORY if light else NIGHT
+    rounded(draw, (64, y, 88, y + 24), 7, RUST)
+    rounded(draw, (70, y + 5, 82, y + 12), 4, BLACK)
+    draw.text((102, y - 1), "NotchUsage", font=fnt(20, "rounded"), fill=fg)
 
 
-def eyebrow(draw, text, x=407, y=61, dark=False):
-    tracking(draw, (x, y), text.upper(), fnt(13, "serif", True), (201, 106, 78) if dark else RUST, 2)
+def top_meta(draw, chapter: str, label: str):
+    brand(draw)
+    tracking(draw, (1132, 59), f"{chapter}  /  {label.upper()}", fnt(11), IVORY_2, 1.6)
+    line(draw, (64, 98, 1376, 98), HAIRLINE)
 
 
-def page_rule(draw, y=190, dark=False, progress=1.0):
-    color = (135, 145, 165) if dark else SLATE
-    line(draw, (407, y, 407 + int(954 * progress), y), color, 4)
+def section_label(draw, number: str, label: str, x: int, y: int):
+    rounded(draw, (x, y, x + 42, y + 24), 12, (188, 76, 52, 38), (231, 112, 80, 90))
+    draw.text((x + 21, y + 12), number, font=fnt(11, "rounded"), fill=RUST_BRIGHT, anchor="mm")
+    tracking(draw, (x + 57, y + 5), label.upper(), fnt(11), MUTED, 1.7)
 
 
-def progress_bar(draw, box, percent, color, dark=True):
+def label_pill(draw, x, y, text, color, width=None):
+    if width is None:
+        width = int(draw.textlength(text, font=fnt(11, "rounded"))) + 28
+    rounded(draw, (x, y, x + width, y + 28), 14, (*color, 25), (*color, 78))
+    draw.ellipse((x + 11, y + 11, x + 17, y + 17), fill=color)
+    draw.text((x + 23, y + 6), text, font=fnt(11, "rounded"), fill=IVORY_2)
+    return width
+
+
+def device(
+    draw,
+    box,
+    *,
+    hover=0.0,
+    refresh=0.0,
+    claude_5h=82,
+    claude_week=64,
+    codex=73,
+    pointer=None,
+):
     x1, y1, x2, y2 = box
-    bg = (255, 255, 255, 34) if dark else (20, 20, 20, 25)
-    rounded(draw, box, (y2 - y1) // 2, bg)
-    rounded(draw, (x1, y1, x1 + (x2 - x1) * percent / 100, y2), (y2 - y1) // 2, color)
+    width, height = x2 - x1, y2 - y1
+
+    # Layered display frame.
+    rounded(draw, (x1 - 10, y1 - 10, x2 + 10, y2 + 10), 30, (3, 4, 6), (255, 255, 255, 33), 2)
+    rounded(draw, (x1, y1, x2, y2), 22, (18, 21, 27))
+
+    # A restrained desktop wallpaper.
+    for row in range(int(height)):
+        amount = row / max(1, height)
+        color = mix((34, 39, 50), (17, 21, 28), amount)
+        draw.line((x1 + 1, y1 + row, x2 - 1, y1 + row), fill=color)
+    draw.ellipse((x2 - 420, y1 - 250, x2 + 140, y1 + 310), fill=(166, 72, 54, 36))
+    draw.ellipse((x1 - 180, y2 - 300, x1 + 380, y2 + 260), fill=(48, 115, 107, 24))
+
+    # Minimal menu bar details.
+    draw.text((x1 + 18, y1 + 11), "●  ●  ●", font=fnt(8), fill=(255, 255, 255, 45))
+    draw.text((x2 - 22, y1 + 10), "9:41", font=fnt(9, "rounded"), fill=(220, 224, 229), anchor="ra")
+
+    center = (x1 + x2) // 2
+    compact_w = min(704, int(width * 0.68))
+    compact_x1, compact_x2 = center - compact_w // 2, center + compact_w // 2
+    compact_y = y1
+    notch_w = min(216, int(width * 0.21))
+    notch_h = 43
+    bar_h = 52
+
+    # The app lives around the physical notch.
+    rounded(draw, (compact_x1, compact_y, compact_x2, compact_y + bar_h), 17, (1, 2, 3), (255, 255, 255, 24))
+    rounded(draw, (center - notch_w // 2, compact_y, center + notch_w // 2, compact_y + notch_h), 15, BLACK)
+    draw.rectangle((center - notch_w // 2, compact_y, center + notch_w // 2, compact_y + 18), fill=BLACK)
+
+    small = fnt(11, "rounded")
+    value = fnt(12, "rounded")
+    draw.text((compact_x1 + 19, compact_y + 10), "Claude", font=value, fill=IVORY)
+    draw.text(
+        (center - notch_w // 2 - 18, compact_y + 29),
+        f"5h {claude_5h}%    W {claude_week}%",
+        font=small,
+        fill=CLAUDE,
+        anchor="ra",
+    )
+    right_x = center + notch_w // 2 + 19
+    draw.text((right_x, compact_y + 10), "Codex", font=value, fill=IVORY)
+    draw.text((compact_x2 - 18, compact_y + 28), f"{codex}%", font=value, fill=CODEX, anchor="ra")
+
+    if refresh > 0:
+        spinner_alpha = int(255 * math.sin(refresh * math.pi))
+        r = 8
+        draw.arc(
+            (center - r, compact_y + 34 - r, center + r, compact_y + 34 + r),
+            -50,
+            245,
+            fill=(242, 238, 230, spinner_alpha),
+            width=2,
+        )
+
+    if hover > 0:
+        full_y = compact_y + bar_h - 2
+        full_h = int(190 * hover)
+        rounded(
+            draw,
+            (center - 392, full_y, center + 392, full_y + full_h),
+            22,
+            (14, 16, 20),
+            (255, 255, 255, 28),
+        )
+        if hover > 0.52:
+            content_alpha = int(255 * phase(hover, 0.52, 1))
+            divider = (255, 255, 255, int(25 * phase(hover, 0.52, 1)))
+            line(draw, (center, full_y + 24, center, full_y + 163), divider)
+            _provider_details(
+                draw,
+                center - 358,
+                full_y + 24,
+                "CLAUDE",
+                CLAUDE,
+                [("5-hour window", f"{claude_5h}%", "Today, 6:40 PM"), ("Weekly", f"{claude_week}%", "Friday, 4:13 PM")],
+                content_alpha,
+            )
+            _provider_details(
+                draw,
+                center + 34,
+                full_y + 24,
+                "CODEX",
+                CODEX,
+                [("Weekly allowance", f"{codex}%", "Friday, 4:13 PM")],
+                content_alpha,
+            )
+            draw.text(
+                (center + 34, full_y + 126),
+                "Authoritative service value",
+                font=fnt(11, "rounded"),
+                fill=(*MUTED, content_alpha),
+            )
+
+    if pointer is not None:
+        px, py, click = pointer
+        if click > 0:
+            radius = 14 + click * 26
+            draw.ellipse(
+                (px - radius, py - radius, px + radius, py + radius),
+                outline=(*RUST_BRIGHT, int(165 * (1 - click))),
+                width=2,
+            )
+        points = [
+            (px, py),
+            (px + 3, py + 26),
+            (px + 10, py + 19),
+            (px + 18, py + 34),
+            (px + 24, py + 30),
+            (px + 16, py + 16),
+            (px + 28, py + 14),
+        ]
+        draw.polygon(points, fill=IVORY, outline=(15, 17, 20))
 
 
-def widget(draw, y: int, hover=False, refreshing=False, scale=1.0):
-    center = 890
-    width = int(780 * scale)
-    h = int(64 * scale)
-    x1, x2 = center - width // 2, center + width // 2
-    notch = int(210 * scale)
-    rounded(draw, (x1, y, x2, y + h), int(18 * scale), (6, 7, 8), (255, 255, 255, 24), 1)
-    draw.rectangle((center - notch // 2, y, center + notch // 2, y + int(38 * scale)), fill=(0, 0, 0))
-    rounded(draw, (center - notch // 2, y, center + notch // 2, y + int(47 * scale)), int(15 * scale), (0, 0, 0))
-    draw.rectangle((center - notch // 2, y, center + notch // 2, y + int(20 * scale)), fill=(0, 0, 0))
-
-    if refreshing:
-        r = int(9 * scale)
-        cx, cy = center, y + int(43 * scale)
-        draw.arc((cx-r, cy-r, cx+r, cy+r), 30, 285, fill=(230, 230, 225), width=max(1, int(2*scale)))
-    else:
-        rounded(draw, (center - int(22*scale), y + int(45*scale), center + int(22*scale), y + int(49*scale)), int(2*scale), (255, 255, 255, 26))
-
-    small = fnt(int(12 * scale), "sans")
-    small_b = fnt(int(13 * scale), "sans", True)
-    if not hover:
-        draw.text((x1 + int(23*scale), y + int(12*scale)), "Claude", font=small_b, fill=(221, 218, 212))
-        draw.text((x1 + int(23*scale), y + int(35*scale)), "5h 82%   W 64%", font=small, fill=CLAUDE)
-        right = center + notch // 2 + int(26*scale)
-        draw.text((right, y + int(23*scale)), "Codex", font=small_b, fill=(221, 218, 212))
-        draw.text((x2 - int(24*scale), y + int(23*scale)), "62%", font=small_b, fill=CODEX, anchor="ra")
-    else:
-        lx = x1 + int(19*scale)
-        draw.text((lx, y + int(10*scale)), "5h", font=small, fill=CLAUDE)
-        progress_bar(draw, (lx + int(29*scale), y + int(17*scale), lx + int(150*scale), y + int(23*scale)), 82, CLAUDE)
-        draw.text((lx + int(192*scale), y + int(8*scale)), "82%", font=small_b, fill=WHITE, anchor="ra")
-        draw.text((lx, y + int(37*scale)), "W", font=small, fill=CLAUDE)
-        progress_bar(draw, (lx + int(29*scale), y + int(44*scale), lx + int(150*scale), y + int(50*scale)), 64, CLAUDE)
-        draw.text((lx + int(192*scale), y + int(35*scale)), "64%", font=small_b, fill=WHITE, anchor="ra")
-        rx = center + notch // 2 + int(24*scale)
-        draw.text((rx, y + int(22*scale)), "Codex", font=small_b, fill=(221, 218, 212))
-        progress_bar(draw, (rx + int(61*scale), y + int(29*scale), rx + int(170*scale), y + int(35*scale)), 62, CODEX)
-        draw.text((x2 - int(22*scale), y + int(20*scale)), "62%", font=small_b, fill=WHITE, anchor="ra")
-    return (x1, y, x2, y+h)
+def _provider_details(draw, x, y, name, color, rows, alpha):
+    tracking(draw, (x, y), name, fnt(10), (*color, alpha), 1.3)
+    yy = y + 34
+    for label, value, reset in rows:
+        draw.text((x, yy), label, font=fnt(15, "rounded"), fill=(*IVORY, alpha))
+        draw.text((x + 318, yy), value, font=fnt(15, "rounded"), fill=(*color, alpha), anchor="ra")
+        draw.text((x, yy + 25), f"Resets {reset}", font=fnt(11, "rounded"), fill=(*MUTED, alpha))
+        yy += 68
 
 
-def details(draw, y: int, amount: float, dark_page=False):
-    if amount <= 0:
-        return
-    center, width, full_h = 890, 850, 206
-    x1 = center - width // 2
-    h = int(full_h * amount)
-    fill = (247, 244, 237) if dark_page else (36, 34, 31)
-    fg = INK if dark_page else WHITE
-    muted = MUTED if dark_page else (175, 170, 162)
-    rounded(draw, (x1, y, x1+width, y+h), 22, fill, (255, 255, 255, 22) if not dark_page else HAIRLINE, 1)
-    if amount < 0.62:
-        return
-    a = int(255 * phase(amount, 0.62, 1))
-    line(draw, (center, y+27, center, y+full_h-27), (140, 130, 116, 45) if dark_page else (255, 255, 255, 28))
-    draw.text((x1+34, y+28), "CLAUDE", font=fnt(12, "serif", True), fill=(*RUST, a))
-    draw.text((center+34, y+28), "CODEX", font=fnt(12, "serif", True), fill=(*CODEX, a))
-    draw.text((x1+34, y+64), "5-hour window", font=fnt(18, "serif", True), fill=(*fg, a))
-    draw.text((center-35, y+65), "82%", font=fnt(18, "serif", True), fill=(*CLAUDE, a), anchor="ra")
-    draw.text((x1+34, y+95), "Resets today at 18:40", font=fnt(13, "sans"), fill=(*muted, a))
-    line(draw, (x1+34, y+125, center-35, y+125), (120, 110, 95, 38) if dark_page else (255, 255, 255, 22))
-    draw.text((x1+34, y+143), "Weekly", font=fnt(14, "serif", True), fill=(*fg, a))
-    draw.text((center-35, y+143), "64%  ·  Aug 1, 16:13", font=fnt(13, "sans"), fill=(*muted, a), anchor="ra")
-    draw.text((center+34, y+64), "Weekly allowance", font=fnt(18, "serif", True), fill=(*fg, a))
-    draw.text((x1+width-34, y+65), "62%", font=fnt(18, "serif", True), fill=(*CODEX, a), anchor="ra")
-    draw.text((center+34, y+95), "Resets Aug 1 at 16:13", font=fnt(13, "sans"), fill=(*muted, a))
-    line(draw, (center+34, y+125, x1+width-34, y+125), (120, 110, 95, 38) if dark_page else (255, 255, 255, 22))
-    draw.text((center+34, y+143), "Authoritative server value", font=fnt(13, "sans"), fill=(*CODEX, a))
+def floating_card(draw, box, title, body, accent=RUST, index=None):
+    x1, y1, x2, y2 = box
+    shadow = (x1 + 4, y1 + 10, x2 + 4, y2 + 10)
+    rounded(draw, shadow, 22, (0, 0, 0, 50))
+    rounded(draw, box, 22, PANEL, (255, 255, 255, 23))
+    if index is not None:
+        rounded(draw, (x1 + 24, y1 + 24, x1 + 58, y1 + 58), 10, (*accent, 26), (*accent, 68))
+        draw.text((x1 + 41, y1 + 41), index, font=fnt(11, "rounded"), fill=accent, anchor="mm")
+    draw.text((x1 + 24, y1 + 80), title, font=fnt(19, "rounded"), fill=IVORY)
+    draw.multiline_text((x1 + 24, y1 + 117), body, font=fnt(13, "rounded"), fill=MUTED, spacing=8)
 
 
-def cursor(draw, x, y, click=0, dark=False):
-    if click > 0:
-        r = 18 + 35 * click
-        draw.ellipse((x-r, y-r, x+r, y+r), outline=(*RUST, int(180*(1-click))), width=2)
-    fill = INK if not dark else WHITE
-    pts = [(x, y), (x+2, y+28), (x+10, y+20), (x+18, y+35), (x+24, y+31), (x+16, y+17), (x+28, y+15)]
-    draw.polygon(pts, fill=fill, outline=PAPER if not dark else INK)
-
-
-def cover(t: float) -> Image.Image:
+def intro(t: float) -> Image.Image:
     layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-    d = ImageDraw.Draw(layer, "RGBA")
-    editorial_chrome(d, active="01")
-    eyebrow(d, "NOTCHUSAGE · 2026 INTRODUCTION")
-    reveal = phase(t, 0.35, 1.2)
-    y = 124 + int((1-reveal)*18)
-    d.multiline_text((407, y), "Your AI usage,\nwhere you already look.", font=fnt(62, "serif", True), fill=INK, spacing=5)
-    d.text((409, 282), "Claude 与 Codex 的实时额度，安静地留在刘海两侧。", font=fnt(20, "song"), fill=INK_2)
-    d.text((409, 328), "By Lyric98  ·  Native macOS utility", font=fnt(14, "serif", True), fill=INK)
-    line(d, (407, 376, 1360, 376), HAIRLINE)
-    d.text((407, 401), "Source:", font=fnt(12, "serif", True), fill=INK)
-    rounded(d, (467, 395, 632, 423), 4, PAPER_2)
-    d.text((478, 401), "github.com/Lyric98", font=fnt(11, "sans"), fill=RUST)
-    d.text((661, 401), "Build:", font=fnt(12, "serif", True), fill=INK)
-    rounded(d, (708, 395, 786, 423), 4, PAPER_2)
-    d.text((721, 401), "SwiftUI", font=fnt(11, "sans"), fill=RUST)
-    page_rule(d, 454, progress=phase(t, 0.8, 1.6))
-    d.text((407, 510), "TL;DR", font=fnt(34, "serif", True), fill=INK)
-    line(d, (407, 559, 1360, 559), HAIRLINE)
-    d.text((407, 586), "A quiet status surface for two tools you use every day.", font=fnt(23, "serif"), fill=INK)
-    d.text((407, 630), "No dashboard. No context switching. No telemetry.", font=fnt(17, "sans"), fill=MUTED)
-    widget(d, 705, hover=False, scale=0.82)
+    draw = ImageDraw.Draw(layer, "RGBA")
+    brand(draw)
+    label_pill(draw, 1162, 52, "NATIVE macOS", BLUE, 214)
+
+    reveal = phase(t, 0.25, 1.1)
+    x = int(86 - (1 - reveal) * 28)
+    section_label(draw, "00", "A quieter way to know", x, 176)
+    draw.multiline_text(
+        (x, 226),
+        "AI limits,\nat a glance.",
+        font=fnt(73, "serif"),
+        fill=IVORY,
+        spacing=2,
+    )
+    draw.multiline_text(
+        (x + 4, 418),
+        "Claude and Codex usage, shaped around\nthe place your eyes already visit.",
+        font=fnt(20, "rounded"),
+        fill=IVORY_2,
+        spacing=11,
+    )
+    label_pill(draw, x + 4, 504, "Live service values", CODEX)
+    label_pill(draw, x + 175, 504, "One-click refresh", CLAUDE)
+
+    device(draw, (720, 188, 1370, 650), claude_5h=82, claude_week=64, codex=73)
+    draw.text((724, 694), "Designed for the MacBook notch.", font=fnt(13, "rounded"), fill=MUTED)
+    line(draw, (86, 800, 1374, 800), HAIRLINE)
+    tracking(draw, (86, 824), "OPEN SOURCE  ·  MIT LICENSE  ·  NO TELEMETRY", fnt(11), MUTED, 1.4)
+    draw.text((1374, 822), "2026", font=fnt(12, "rounded"), fill=IVORY_2, anchor="ra")
     return layer
 
 
-def quiet_default(t: float) -> Image.Image:
+def quiet(t: float) -> Image.Image:
     layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-    d = ImageDraw.Draw(layer, "RGBA")
-    editorial_chrome(d, active="01")
-    eyebrow(d, "01 · THE QUIET DEFAULT")
-    d.text((407, 110), "Always visible. Never loud.", font=fnt(52, "serif", True), fill=INK)
-    d.text((409, 176), "平时只保留最重要的数字。", font=fnt(19, "song"), fill=INK_2)
-    page_rule(d, 232, progress=phase(t, 4.1, 5.0))
-    widget(d, 335, hover=False, scale=1.05)
-    d.text((407, 493), "ONE GLANCE", font=fnt(12, "serif", True), fill=RUST)
-    d.text((407, 531), "5h", font=fnt(26, "serif", True), fill=INK)
-    d.text((407, 570), "Short window", font=fnt(13, "sans"), fill=MUTED)
-    line(d, (570, 518, 570, 600), HAIRLINE)
-    d.text((617, 531), "W", font=fnt(26, "serif", True), fill=INK)
-    d.text((617, 570), "Claude weekly", font=fnt(13, "sans"), fill=MUTED)
-    line(d, (812, 518, 812, 600), HAIRLINE)
-    d.text((860, 531), "Codex", font=fnt(26, "serif", True), fill=INK)
-    d.text((860, 570), "Server allowance", font=fnt(13, "sans"), fill=MUTED)
-    line(d, (407, 646, 1360, 646), HAIRLINE)
-    d.text((407, 678), "The interface occupies 34 pt when closed — nothing more.", font=fnt(16, "serif"), fill=INK_2)
+    draw = ImageDraw.Draw(layer, "RGBA")
+    top_meta(draw, "01", "The quiet default")
+    section_label(draw, "01", "The quiet default", 74, 148)
+    draw.text((74, 199), "Only the numbers", font=fnt(46, "serif"), fill=IVORY)
+    draw.text((74, 255), "until you want more.", font=fnt(42, "serif"), fill=IVORY_2)
+    draw.multiline_text(
+        (78, 334),
+        "Claude stays on the left.\nCodex stays on the right.\nThe notch stays useful.",
+        font=fnt(18, "rounded"),
+        fill=MUTED,
+        spacing=12,
+    )
+    line(draw, (78, 464, 390, 464), HAIRLINE)
+    draw.text((78, 490), "5h", font=fnt(26, "rounded"), fill=CLAUDE)
+    draw.text((145, 496), "short window", font=fnt(13, "rounded"), fill=MUTED)
+    draw.text((78, 545), "W", font=fnt(26, "rounded"), fill=CLAUDE)
+    draw.text((145, 551), "weekly window", font=fnt(13, "rounded"), fill=MUTED)
+    draw.text((78, 600), "%", font=fnt(26, "rounded"), fill=CODEX)
+    draw.text((145, 606), "remaining allowance", font=fnt(13, "rounded"), fill=MUTED)
+    device(draw, (470, 162, 1364, 716), claude_5h=82, claude_week=64, codex=73)
+    rounded(draw, (470, 752, 1364, 810), 18, (255, 255, 255, 10), (255, 255, 255, 18))
+    draw.text((494, 772), "Compact by default", font=fnt(14, "rounded"), fill=IVORY)
+    draw.text((1340, 772), "85 pt per side", font=fnt(13, "rounded"), fill=MUTED, anchor="ra")
     return layer
 
 
-def hover_context(t: float) -> Image.Image:
-    layer = INK_BG.copy()
-    d = ImageDraw.Draw(layer, "RGBA")
-    editorial_chrome(d, dark=True, active="02")
-    eyebrow(d, "02 · HOVER FOR CONTEXT", dark=True)
-    d.text((407, 110), "Details, only when invited.", font=fnt(52, "serif", True), fill=WHITE)
-    d.text((409, 176), "鼠标靠近，完整周期与重置时间自然展开。", font=fnt(19, "song"), fill=(214, 207, 196))
-    page_rule(d, 232, dark=True, progress=phase(t, 9.0, 9.8))
-    widget(d, 315, hover=True, scale=1.05)
-    expand = phase(t, 10.0, 11.0)
-    details(d, 382, expand, dark_page=True)
-    # Minimal editorial annotations.
-    if expand > 0.8:
-        line(d, (407, 650, 610, 650), (255, 255, 255, 35))
-        d.text((407, 670), "RESET TIMES", font=fnt(11, "serif", True), fill=(201, 106, 78))
-        d.text((407, 700), "Shown in your local time zone.", font=fnt(15, "serif"), fill=(205, 198, 187))
-        line(d, (916, 650, 1118, 650), (255, 255, 255, 35))
-        d.text((916, 670), "REAL VALUES", font=fnt(11, "serif", True), fill=CODEX)
-        d.text((916, 700), "Last success remains during rate limits.", font=fnt(15, "serif"), fill=(205, 198, 187))
-    move = phase(t, 9.0, 10.0)
-    cursor(d, 1260*(1-move)+1020*move, 710*(1-move)+344*move, dark=True)
+def context(t: float) -> Image.Image:
+    layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(layer, "RGBA")
+    top_meta(draw, "02", "Hover for context")
+    section_label(draw, "02", "Hover for context", 74, 142)
+    draw.text((74, 190), "Move closer.", font=fnt(55, "serif"), fill=IVORY)
+    draw.text((74, 252), "See the whole cycle.", font=fnt(55, "serif"), fill=IVORY_2)
+
+    hover = phase(t, 8.9, 10.4)
+    px = int(lerp(1232, 735, phase(t, 8.1, 9.4)))
+    py = int(lerp(724, 188, phase(t, 8.1, 9.4)))
+    device(
+        draw,
+        (184, 351, 1256, 777),
+        hover=hover,
+        claude_5h=82,
+        claude_week=64,
+        codex=73,
+        pointer=(px, py, 0),
+    )
+    if hover > 0.7:
+        label_pill(draw, 1060, 195, "Local reset times", BLUE, 196)
+        line(draw, (1160, 223, 1050, 361), (103, 145, 255, 100), 1)
+    draw.text(
+        (74, 820),
+        "Reset moments appear in your local time zone — and disappear when you leave.",
+        font=fnt(14, "rounded"),
+        fill=MUTED,
+    )
     return layer
 
 
 def refresh_scene(t: float) -> Image.Image:
     layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-    d = ImageDraw.Draw(layer, "RGBA")
-    editorial_chrome(d, active="03")
-    eyebrow(d, "03 · REFRESH, DELIBERATELY")
-    d.text((407, 110), "One click. Two sources.", font=fnt(52, "serif", True), fill=INK)
-    d.text((409, 176), "需要确认时，主动向两边服务端请求最新额度。", font=fnt(19, "song"), fill=INK_2)
-    page_rule(d, 232, progress=phase(t, 16.5, 17.3))
-    local_t = t - 16.5
-    click = math.sin(clamp((local_t-2.1)/0.8) * math.pi) if 2.1 <= local_t <= 2.9 else 0
-    refreshing = 2.5 <= local_t <= 4.2
-    widget(d, 326, hover=False, refreshing=refreshing, scale=1.05)
-    cursor(d, 920, 355, click=click)
-    # Source ledger.
-    d.text((407, 507), "SOURCE LEDGER", font=fnt(12, "serif", True), fill=RUST)
-    line(d, (407, 542, 1360, 542), HAIRLINE)
-    rows = [
-        ("ANTHROPIC", "OAuth usage endpoint", "5h + weekly", CLAUDE),
-        ("OPENAI", "Authoritative usage endpoint", "Codex weekly", CODEX),
+    draw = ImageDraw.Draw(layer, "RGBA")
+    top_meta(draw, "03", "Refresh on demand")
+    section_label(draw, "03", "Refresh on demand", 74, 142)
+    draw.text((74, 190), "Click once.", font=fnt(55, "serif"), fill=IVORY)
+    draw.text((74, 252), "Ask both services.", font=fnt(46, "serif"), fill=IVORY_2)
+
+    local = t - 14.0
+    move = phase(local, 0.4, 1.4)
+    px = int(lerp(1160, 714, move))
+    py = int(lerp(610, 202, move))
+    click = math.sin(phase(local, 1.55, 2.25) * math.pi) if 1.55 <= local <= 2.25 else 0
+    refreshing = math.sin(phase(local, 1.85, 3.55) * math.pi) if 1.85 <= local <= 3.55 else 0
+    value_change = phase(local, 3.25, 4.0)
+    codex = round(lerp(74, 73, value_change))
+    device(
+        draw,
+        (460, 148, 1370, 588),
+        refresh=refreshing,
+        claude_5h=82,
+        claude_week=64,
+        codex=codex,
+        pointer=(px, py, click),
+    )
+
+    status_y = 648
+    statuses = [
+        ("ANTHROPIC", "5-hour + weekly limits", CLAUDE, "UPDATED"),
+        ("OPENAI", "Codex allowance", CODEX, "UPDATED"),
     ]
-    yy = 575
-    for provider, endpoint, scope, color in rows:
-        d.ellipse((407, yy+6, 417, yy+16), fill=color)
-        d.text((438, yy), provider, font=fnt(13, "serif", True), fill=INK)
-        d.text((635, yy), endpoint, font=fnt(14, "serif"), fill=INK_2)
-        d.text((1130, yy), scope, font=fnt(13, "sans"), fill=MUTED)
-        d.text((1325, yy), "SYNCED" if local_t > 4.2 else "QUERY", font=fnt(11, "sans"), fill=color, anchor="ra")
-        line(d, (407, yy+39, 1360, yy+39), HAIRLINE)
-        yy += 66
-    d.text((407, 741), "If an endpoint rate-limits, NotchUsage keeps the last successful real value.", font=fnt(15, "serif"), fill=MUTED)
+    for index, (provider, detail, color, status) in enumerate(statuses):
+        x = 460 + index * 462
+        rounded(draw, (x, status_y, x + 438, status_y + 116), 20, PANEL, (255, 255, 255, 23))
+        draw.ellipse((x + 24, status_y + 28, x + 34, status_y + 38), fill=color)
+        tracking(draw, (x + 48, status_y + 24), provider, fnt(11), IVORY, 1.2)
+        draw.text((x + 24, status_y + 61), detail, font=fnt(13, "rounded"), fill=MUTED)
+        state = status if local > 3.7 else "REQUESTING"
+        state_color = color if local > 3.7 else BLUE
+        draw.text((x + 414, status_y + 27), state, font=fnt(10, "rounded"), fill=state_color, anchor="ra")
+    draw.text((74, 697), "Automatic polling", font=fnt(16, "rounded"), fill=IVORY)
+    draw.multiline_text(
+        (74, 733),
+        "Runs quietly in the background.\nManual refresh is always one click away.",
+        font=fnt(13, "rounded"),
+        fill=MUTED,
+        spacing=8,
+    )
     return layer
 
 
 def native_scene(t: float) -> Image.Image:
     layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-    d = ImageDraw.Draw(layer, "RGBA")
-    editorial_chrome(d, active="04")
-    eyebrow(d, "04 · NATIVE BY DESIGN")
-    d.text((407, 110), "Small software, honestly made.", font=fnt(52, "serif", True), fill=INK)
-    d.text((409, 176), "没有 Electron，没有遥测，也没有第三方后台。", font=fnt(19, "song"), fill=INK_2)
-    page_rule(d, 232, progress=phase(t, 22.0, 22.8))
-    cols = [
-        ("01", "SwiftUI + AppKit", "Native panel, native menu, native login item."),
-        ("02", "Direct endpoints", "Credentials stay local and in memory."),
-        ("03", "Open source", "MIT licensed. Read every line."),
+    draw = ImageDraw.Draw(layer, "RGBA")
+    top_meta(draw, "04", "Native by design")
+    section_label(draw, "04", "Native by design", 74, 142)
+    draw.text((74, 190), "Small software.", font=fnt(55, "serif"), fill=IVORY)
+    draw.text((74, 252), "A very short path to trust.", font=fnt(55, "serif"), fill=IVORY_2)
+
+    cards = [
+        ("01", "Native macOS", "SwiftUI + AppKit.\nNo Electron runtime.", BLUE),
+        ("02", "Private by default", "Credentials stay local.\nNo analytics backend.", CODEX),
+        ("03", "Resilient values", "429-aware backoff.\nLast success stays visible.", CLAUDE),
     ]
-    x = 407
-    for num, title, body in cols:
-        d.text((x, 298), num, font=fnt(12, "serif", True), fill=RUST)
-        line(d, (x, 329, x+260, 329), HAIRLINE)
-        d.text((x, 362), title, font=fnt(21, "serif", True), fill=INK)
-        d.multiline_text((x, 405), body, font=fnt(14, "serif"), fill=MUTED, spacing=8)
-        x += 318
-    rounded(d, (407, 548, 1360, 666), 4, INK)
-    d.text((438, 571), "$", font=fnt(16, "sans", True), fill=CODEX)
-    d.text((465, 571), "git clone https://github.com/Lyric98/NotchUsage.git", font=fnt(16, "sans"), fill=WHITE)
-    d.text((438, 612), "$", font=fnt(16, "sans", True), fill=CODEX)
-    d.text((465, 612), "cd NotchUsage && ./install.sh", font=fnt(16, "sans"), fill=WHITE)
-    d.text((407, 718), "Build once. Launch at login. Forget the dashboard.", font=fnt(22, "serif", True), fill=INK)
+    card_w = 400
+    for index, (number, title, body, accent) in enumerate(cards):
+        x = 74 + index * 431
+        floating_card(draw, (x, 352, x + card_w, 558), title, body, accent, number)
+
+    rounded(draw, (74, 616, 1366, 779), 24, (7, 9, 12), (255, 255, 255, 30))
+    draw.ellipse((101, 642, 111, 652), fill=(255, 95, 86))
+    draw.ellipse((119, 642, 129, 652), fill=(255, 189, 46))
+    draw.ellipse((137, 642, 147, 652), fill=(39, 201, 63))
+    draw.text((101, 685), "$", font=fnt(15, "rounded"), fill=CODEX)
+    draw.text((130, 684), CLONE, font=fnt(15, "rounded"), fill=IVORY)
+    draw.text((101, 726), "$", font=fnt(15, "rounded"), fill=CODEX)
+    draw.text((130, 725), "cd NotchUsage && ./install.sh", font=fnt(15, "rounded"), fill=IVORY)
+    draw.text((1366, 815), "Clone. Install. Launch.", font=fnt(11, "rounded"), fill=MUTED, anchor="ra")
     return layer
 
 
 def outro(t: float) -> Image.Image:
-    layer = INK_BG.copy()
-    d = ImageDraw.Draw(layer, "RGBA")
-    tracking(d, (74, 74), "NOTCHUSAGE · OPEN SOURCE", fnt(13, "serif", True), (201, 106, 78), 2)
-    line(d, (74, 118, 1366, 118), (255, 255, 255, 28))
-    d.multiline_text((74, 210), "Your limits.\nIn sight, not in the way.", font=fnt(68, "serif", True), fill=WHITE, spacing=7)
-    d.text((78, 408), "用量在视线里，工具在工作流外。", font=fnt(23, "song"), fill=(205, 198, 187))
-    widget(d, 510, hover=False, scale=1.0)
-    line(d, (74, 720, 1366, 720), (255, 255, 255, 28))
-    d.text((74, 754), "github.com/Lyric98/NotchUsage", font=fnt(17, "serif", True), fill=WHITE)
-    d.text((74, 793), "Native macOS · MIT License · No telemetry", font=fnt(13, "sans"), fill=(170, 164, 154))
-    rounded(d, (1112, 758, 1366, 812), 4, (247, 244, 237))
-    d.text((1239, 784), "VIEW ON GITHUB  ↗", font=fnt(12, "serif", True), fill=INK, anchor="mm")
+    layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(layer, "RGBA")
+    brand(draw)
+    tracking(draw, (1174, 58), "OPEN SOURCE  /  MIT", fnt(11), MUTED, 1.6)
+    line(draw, (64, 98, 1376, 98), HAIRLINE)
+
+    draw.multiline_text(
+        (76, 176),
+        "Keep the limits.\nLose the dashboard.",
+        font=fnt(74, "serif"),
+        fill=IVORY,
+        spacing=4,
+    )
+    draw.multiline_text(
+        (82, 378),
+        "A focused macOS utility for Claude and Codex.",
+        font=fnt(19, "rounded"),
+        fill=IVORY_2,
+    )
+    device(draw, (760, 173, 1370, 599), claude_5h=82, claude_week=64, codex=73)
+
+    rounded(draw, (76, 522, 693, 594), 20, IVORY)
+    draw.text((104, 545), REPO, font=fnt(17, "rounded"), fill=NIGHT)
+    draw.text((662, 545), "↗", font=fnt(19, "rounded"), fill=RUST, anchor="ra")
+
+    line(draw, (76, 704, 1370, 704), HAIRLINE)
+    label_pill(draw, 76, 750, "Claude + Codex", RUST, 174)
+    label_pill(draw, 266, 750, "Launch at login", BLUE, 178)
+    label_pill(draw, 460, 750, "No telemetry", CODEX, 150)
+    draw.text((1370, 757), "Made for macOS", font=fnt(13, "rounded"), fill=MUTED, anchor="ra")
     return layer
 
 
 def render(index: int) -> Image.Image:
     t = index / FPS
-    frame = PAPER_BG.copy()
+    frame = BACKGROUND.copy()
     scenes = [
-        (0.0, 4.8, cover),
-        (3.8, 10.0, quiet_default),
-        (9.0, 17.5, hover_context),
-        (16.5, 23.0, refresh_scene),
-        (22.0, 27.8, native_scene),
-        (26.8, 31.0, outro),
+        (0.0, 5.0, intro),
+        (4.2, 9.1, quiet),
+        (8.3, 14.7, context),
+        (13.9, 20.4, refresh_scene),
+        (19.6, 26.1, native_scene),
+        (25.3, 30.0, outro),
     ]
     for start, end, renderer in scenes:
-        opacity = scene_alpha(t, start, end)
+        opacity = fade(t, start, end)
         if opacity > 0:
-            composite(frame, renderer(t), opacity)
+            alpha_composite(frame, renderer(t), opacity)
     return frame.convert("RGB")
 
 
 def main() -> int:
     OUT.parent.mkdir(parents=True, exist_ok=True)
-    cmd = [
-        "ffmpeg", "-y",
-        "-f", "rawvideo", "-pix_fmt", "rgb24",
-        "-s", f"{W}x{H}", "-r", str(FPS), "-i", "-",
-        "-an", "-c:v", "libx264", "-preset", "medium",
-        "-crf", "17", "-pix_fmt", "yuv420p",
-        "-movflags", "+faststart", str(OUT),
+    command = [
+        "ffmpeg",
+        "-y",
+        "-f",
+        "rawvideo",
+        "-pix_fmt",
+        "rgb24",
+        "-s",
+        f"{W}x{H}",
+        "-r",
+        str(FPS),
+        "-i",
+        "-",
+        "-an",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "medium",
+        "-crf",
+        "17",
+        "-pix_fmt",
+        "yuv420p",
+        "-movflags",
+        "+faststart",
+        str(OUT),
     ]
-    proc = subprocess.Popen(cmd, stdin=subprocess.PIPE)
-    assert proc.stdin is not None
+    process = subprocess.Popen(command, stdin=subprocess.PIPE)
+    assert process.stdin is not None
     try:
-        for i in range(FPS * DURATION):
-            proc.stdin.write(render(i).tobytes())
-            if i % FPS == 0:
-                print(f"Rendering {i // FPS:02d}/{DURATION}s", flush=True)
+        for index in range(FPS * DURATION):
+            process.stdin.write(render(index).tobytes())
+            if index % FPS == 0:
+                print(f"Rendering {index // FPS:02d}/{DURATION}s", flush=True)
     finally:
-        proc.stdin.close()
-    return proc.wait()
+        process.stdin.close()
+    return process.wait()
 
 
 if __name__ == "__main__":
