@@ -27,7 +27,7 @@
 ## 1. 🎬 See it in action
 
 <!-- The GitHub user-attachments URL inserted here renders as a native inline video player. -->
-https://github.com/user-attachments/assets/79669dab-51b2-47c7-8046-33003176290e
+https://github.com/user-attachments/assets/1ae90079-1e49-40f3-a6c1-3d088bb2b3b1
 
 <p align="center">
   <em>Claude on the left. Codex on the right. The desktop stays yours.</em>

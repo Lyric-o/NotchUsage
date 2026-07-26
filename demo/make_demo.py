@@ -108,10 +108,16 @@ def make_background() -> Image.Image:
         amount = y / H
         color = mix((17, 20, 25), (8, 10, 13), amount)
         draw.line((0, y, W, y), fill=color + (255,))
+    # Composite the grid on its own layer so its alpha survives the final RGB
+    # conversion. Drawing translucent pixels directly into the base image would
+    # leave white RGB values behind when the alpha channel is removed.
+    grid = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    grid_draw = ImageDraw.Draw(grid, "RGBA")
     for x in range(0, W + 1, 72):
-        line(draw, (x, 0, x, H), (255, 255, 255, 8))
+        line(grid_draw, (x, 0, x, H), (255, 255, 255, 10))
     for y in range(0, H + 1, 72):
-        line(draw, (0, y, W, y), (255, 255, 255, 8))
+        line(grid_draw, (0, y, W, y), (255, 255, 255, 10))
+    image.alpha_composite(grid)
     rng = random.Random(18)
     for _ in range(820):
         x, y = rng.randrange(W), rng.randrange(H)
