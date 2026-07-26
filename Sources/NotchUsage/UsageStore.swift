@@ -78,11 +78,7 @@ final class UsageStore: ObservableObject {
         // minute. Local session data is only a fallback until that first success.
         // A rate-limit backoff suppresses the request entirely — even on force,
         // since hammering a limited endpoint only prolongs the limit.
-        let codexDue = force
-            || lastCodexRemotePoll == nil
-            || now.timeIntervalSince(lastCodexRemotePoll!) >= 59
-        if codexDue && !isBackedOff(codexState, now: now) {
-            lastCodexRemotePoll = now
+        if shouldPoll(&codexState, lastPoll: &lastCodexRemotePoll, force: force, now: now) {
             switch await remoteCodexUsage() {
             case .success(let usage):
                 codex = sanitize(usage)
@@ -107,11 +103,7 @@ final class UsageStore: ObservableObject {
             cache(codex, key: "liveCodexUsage")
         }
 
-        let claudeDue = force
-            || lastClaudePoll == nil
-            || now.timeIntervalSince(lastClaudePoll!) >= 59
-        if claudeDue && !isBackedOff(claudeState, now: now) {
-            lastClaudePoll = now
+        if shouldPoll(&claudeState, lastPoll: &lastClaudePoll, force: force, now: now) {
             switch await localClaudeUsage() {
             case .success(let usage):
                 claude = sanitize(usage)
@@ -159,6 +151,28 @@ final class UsageStore: ObservableObject {
     }
 
     // MARK: - Backoff & status
+
+    /// Decides whether a provider should poll now, and if so records the poll.
+    /// Returns true and stamps `lastPoll` when a request should be made.
+    ///
+    /// A provider is due on any of: a manual/forced refresh, the normal 59s
+    /// cadence elapsing, or a rate-limit backoff having just expired. That last
+    /// case is why a short `Retry-After` (say 20s) doesn't leave us idling until
+    /// 59s after the 429: once the window passes, the very next 5s timer tick
+    /// retries. An *active* backoff always wins — force never bypasses it.
+    private func shouldPoll(_ state: inout FetchState, lastPoll: inout Date?, force: Bool, now: Date) -> Bool {
+        guard !isBackedOff(state, now: now) else { return false }
+
+        let backoffExpired = state.backoffUntil != nil // not active (guarded above) ⇒ expired
+        let cadenceDue = lastPoll == nil || now.timeIntervalSince(lastPoll!) >= 59
+        guard force || cadenceDue || backoffExpired else { return false }
+
+        lastPoll = now
+        // Consume the expired-backoff marker so it fires the retry exactly once;
+        // keep `backoffStep` so a repeat 429 still escalates exponentially.
+        state.backoffUntil = nil
+        return true
+    }
 
     private func isBackedOff(_ state: FetchState, now: Date) -> Bool {
         guard let until = state.backoffUntil else { return false }
@@ -238,6 +252,28 @@ final class UsageStore: ObservableObject {
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = TimeZone(identifier: "GMT")
         formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss zzz"
+        return formatter
+    }()
+
+    /// Parses RFC3339/ISO8601 reset timestamps. Anthropic returns fractional
+    /// seconds (e.g. "2026-07-26T19:39:59.244645+00:00"), which the default
+    /// formatter drops on the floor; try the fractional form first, then fall
+    /// back to the plain form (e.g. "2026-07-26T02:00:00Z"). A single formatter
+    /// can't do both — .withFractionalSeconds rejects strings without them.
+    nonisolated private static func parseISODate(_ string: String) -> Date? {
+        if let date = isoFractionalFormatter.date(from: string) { return date }
+        return isoPlainFormatter.date(from: string)
+    }
+
+    nonisolated(unsafe) private static let isoFractionalFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+
+    nonisolated(unsafe) private static let isoPlainFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
         return formatter
     }()
 
@@ -385,14 +421,13 @@ final class UsageStore: ObservableObject {
 
             let fiveReset = fiveHour["resets_at"] as? String
             let weekReset = sevenDay["resets_at"] as? String
-            let isoFormatter = ISO8601DateFormatter()
             return .success(ProviderUsage(
                 remainingPercent: 100 - sevenDayUsed,
                 label: "Weekly · Live",
-                resetsAt: weekReset.flatMap(isoFormatter.date(from:)),
+                resetsAt: weekReset.flatMap(Self.parseISODate),
                 secondaryRemainingPercent: 100 - fiveHourUsed,
                 secondaryLabel: "5-hour window · Live",
-                secondaryResetsAt: fiveReset.flatMap(isoFormatter.date(from:))
+                secondaryResetsAt: fiveReset.flatMap(Self.parseISODate)
             ))
         } catch {
             return .failed
