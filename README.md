@@ -30,7 +30,11 @@
 https://github.com/user-attachments/assets/1ae90079-1e49-40f3-a6c1-3d088bb2b3b1
 
 <p align="center">
-  <a href="demo/NotchUsage-demo-zh.mp4">▶ Watch the 30-second Chinese voice-over cut</a>
+  <a href="demo/NotchUsage-demo-zh.mp4">
+    <img src="demo/NotchUsage-cover.png" alt="NotchUsage — Claude and Codex usage at a glance" width="900">
+  </a>
+  <br>
+  <sub>▶ Click the cover to watch the 30-second Chinese voice-over cut</sub>
   <br><br>
   <em>Claude on the left. Codex on the right. The desktop stays yours.</em>
 </p>
