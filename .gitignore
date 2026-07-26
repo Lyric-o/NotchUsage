@@ -6,3 +6,4 @@ dist/
 *.xcworkspace/xcuserdata/
 __pycache__/
 *.pyc
+demo/audio/

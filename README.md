@@ -30,6 +30,8 @@
 https://github.com/user-attachments/assets/1ae90079-1e49-40f3-a6c1-3d088bb2b3b1
 
 <p align="center">
+  <a href="demo/NotchUsage-demo-zh.mp4">▶ Watch the 30-second Chinese voice-over cut</a>
+  <br><br>
   <em>Claude on the left. Codex on the right. The desktop stays yours.</em>
 </p>
 
